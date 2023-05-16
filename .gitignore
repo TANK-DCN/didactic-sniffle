@@ -1,1 +1,4 @@
 .vscode
+log
+eth_addr_info.txt
+/home/yrpang/yog-dpdk/configs/yog-config1.h

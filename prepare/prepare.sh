@@ -21,8 +21,10 @@ meson setup build
 popd
 popd
 
+chown -R yrpang:servelesslegoos- /local/dpdk-stable-21.11.2
+
 pushd /local/repository/prepare/
-cat add_to_bashrc.txt >> ~/.bashrc
+cat add_to_bashrc.txt >> /users/yrpang/.bashrc
 popd
 
 echo "Finished init dpdk"

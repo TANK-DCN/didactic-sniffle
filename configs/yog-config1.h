@@ -14,4 +14,4 @@ int arbiter_server_id_yog1 = 1;
 
 
 #endif
-int this_server_id_yog1 = 4;
+int this_server_id_yog1 = 8;

@@ -89,11 +89,11 @@ bool DEBUG_LOCK_yog1 = false;
 #define max(X,Y) ((X) > (Y) ? (X) : (Y))
 
 #define MAX_CONCURRENT_FLOW 9995 // 发送流个数
-#define SERVERNUM 5             // 一共多少个IP，读取文件时需要
+#define SERVERNUM 9             // 一共多少个IP，读取文件时需要
 #define MAX_TIME 900            // in second  程序最多运行多久
 int total_flow_num_yog1 = 9995;   // total flows among all servers
 #define RTT_BYTES (25 * ((DEFAULT_PKT_SIZE) - (HDR_ONLY_SIZE))) // 这个需要测完自己填
-#define RTT 0.003
+#define RTT 0.3
 #define TIME_OUT_TIME 3 * RTT
 
 #define log_level          1   //1  packet level    2 flow level
@@ -114,7 +114,7 @@ int total_flow_num_yog1 = 9995;   // total flows among all servers
 //！！！！！！！！！！！所有流量ID从1开始
 
 #define TIMER_LCORE         2 
-#define TIMER_INTERVAL_MS   0.000005//定时器触发间隔，这里是0.1秒
+#define TIMER_INTERVAL_MS   0.0005//定时器触发间隔，这里是0.1秒
 
 #define PT_INF_yog1O            0X20
 #define PT_GRANT                0X21
@@ -2364,7 +2364,7 @@ construct_ctl_pkt(int pkt_type,int flow_id,int where)//构建数据包并加入�
     if (dst_server_id == -1) {
         if(SHOW_DEBUG_INFO_yog1) printf("server error: cannot find server id\n");
     }
-    rte_ether_addr_copy(&eth_addr_array[dst_server_id], &eth_hdr->dst_addr);
+    rte_ether_addr_copy(&eth_addr_array[where], &eth_hdr->dst_addr);
     rte_ether_addr_copy(&eth_addr_array[this_server_id_yog1], &eth_hdr->src_addr);
     eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
@@ -2850,10 +2850,11 @@ read_config(void)
         if(SHOW_DEBUG_INFO_yog1) printf("%s: no such file\n", ethaddr_filename);
     while (fgets(line, sizeof(line), fd) != NULL) {
         remove_newline(line);
-        sscanf(line, "%x:%x:%x:%x:%x:%x", &eth_addr_array[server_id].addr_bytes[0], 
-            &eth_addr_array[server_id].addr_bytes[1], &eth_addr_array[server_id].addr_bytes[2],
-            &eth_addr_array[server_id].addr_bytes[3], &eth_addr_array[server_id].addr_bytes[4], 
-            &eth_addr_array[server_id].addr_bytes[5]);
+        rte_ether_unformat_addr(line, &eth_addr_array[server_id]);
+        // sscanf(line, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &eth_addr_array[server_id].addr_bytes[0], 
+        //     &eth_addr_array[server_id].addr_bytes[1], &eth_addr_array[server_id].addr_bytes[2],
+        //     &eth_addr_array[server_id].addr_bytes[3], &eth_addr_array[server_id].addr_bytes[4], 
+        //     &eth_addr_array[server_id].addr_bytes[5]);
         // if (verbose_yog1 > 0) {
            printf("Server id = %d   ", server_id);
            print_ether_addr("mac = ", &eth_addr_array[server_id]);
@@ -3072,12 +3073,17 @@ recv_pkt(struct fwd_stream *fs)
         // mb = rte_pktmbuf_clone(mb, mb->pool);
         ipv4_hdr = rte_pktmbuf_mtod_offset(mb, struct rte_ipv4_hdr *, L2_LEN);
         struct rte_ether_hdr *eth = rte_pktmbuf_mtod(mb, struct rte_ether_hdr*);
+        transport_recv_hdr = rte_pktmbuf_mtod_offset(mb, struct rte_tcp_hdr *, L2_LEN + L3_LEN);
+        pkt_type = transport_recv_hdr->PKT_TYPE_8BITS;
+        uint16_t flow_id = rte_be_to_cpu_16(transport_recv_hdr->FLOW_ID_16BITS);
         if (ipv4_hdr->dst_addr != rte_cpu_to_be_32(ip_addr_array[this_server_id_yog1]))
         {
-            // print_ether_addr("pkt not for this, src_mac", &(eth->src_addr));
-            // print_ether_addr("pkt not for this, dst_mac", &(eth->dst_addr));
-            // printf("dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
-            // if(SAVE_DEBUG_INFO_yog1) fprintf(fp,"rec pkt not for this - dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
+            print_ether_addr("pkt not for this, src_mac", &(eth->src_addr));
+            print_ether_addr("pkt not for this, dst_mac", &(eth->dst_addr));
+            printf("src add = %d %d %d %d\n",ipv4_hdr->src_addr&0xFF,(ipv4_hdr->src_addr&0xFF00)>>8,(ipv4_hdr->src_addr&0xFF0000)>>16,(ipv4_hdr->src_addr&0xFF000000)>>24);
+            printf("dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
+            printf("pkt %x from %d, flow id: %d\n", pkt_type, rte_be_to_cpu_32(ipv4_hdr->src_addr)&0xFF, flow_id);
+            if(SAVE_DEBUG_INFO_yog1) fprintf(fp,"rec pkt not for this - dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
             rte_pktmbuf_free(mb);
             continue;
         }
