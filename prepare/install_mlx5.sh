@@ -153,4 +153,4 @@ echo "vm.nr_hugepages=4096" >> /etc/sysctl.conf
 # # Reboot to let the configuration take effects; this task is launched as a
 # # background process and delayed 10s to allow the startup service finished.
 # # TODO: maybe we can now remove the redundant startup service check at the top?
-# sleep 2s && reboot &
+sleep 2s && reboot &

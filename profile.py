@@ -11,6 +11,7 @@ import geni.portal as portal
 import geni.rspec.pg as pg
 # Import the Emulab specific extensions.
 import geni.rspec.emulab as emulab
+import geni.rspec
 
 # Create a portal object,
 pc = portal.Context()
@@ -61,7 +62,7 @@ for i in range(num):
         node.hardware_type = "d6515"
 
     node.installRootKeys(False, True)
-    node.disk_image = "urn:publicid:IDN+emulab.net+image+emulab-ops:UBUNTU18-64-STD"
+    node.disk_image = "urn:publicid:IDN+utah.cloudlab.us+image+servelesslegoos-PG0:homa.node2"
     iface = node.addInterface("eth1")
     # ip_addr = "192.168.1."+str(i+1)
     # iface.addAddress(pg.IPv4Address(ip_addr, "255.255.255.0"))
@@ -73,13 +74,15 @@ for i in range(num):
         link.addInterface(swifaces[i])
     else:
         lan.addInterface(iface)
+        
+    node.addService(pg.Execute(shell="sh", command="sudo /local/repository/prepare/prepare.sh"))
+
     
 
 
 # Install and execute scripts on the node.
 # node.addService(rspec.Install(url="http://example.org/sample.tar.gz", path="/local"))
 # node.addService(rspec.Execute(shell="bash", command="/local/example.sh"))
-node.addService(pg.Execute(shell="sh", command="/local/repository/install.sh"))
 
 
 # Print the generated rspec
