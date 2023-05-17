@@ -70,6 +70,7 @@ for i in range(num):
     if params.if_switch:
         link_name = "link"+str(i)
         link = request.L1Link(link_name)
+        link.bandwidth = 25000000
         link.addInterface(iface)
         link.addInterface(swifaces[i])
     else:
