@@ -82,7 +82,7 @@
 bool SHOW_DEBUG_INFO_yog1 = false;
 bool SAVE_DEBUG_INFO_yog1 = false;
 bool DEBUG_LOCK_yog1 = false;
-#define SHOW_SR_LOG 0
+#define SHOW_SR_LOG 1
 #define SAVE_SR_LOG 0
 
 #define min(X,Y) ((X) < (Y) ? (X) : (Y))
@@ -93,8 +93,9 @@ bool DEBUG_LOCK_yog1 = false;
 #define MAX_TIME 900            // in second  程序最多运行多久
 int total_flow_num_yog1 = 9995;   // total flows among all servers
 #define RTT_BYTES (25 * ((DEFAULT_PKT_SIZE) - (HDR_ONLY_SIZE))) // 这个需要测完自己填
-#define RTT 0.3
+#define RTT 0.003
 #define TIME_OUT_TIME 3 * RTT
+#define MASK (((1 << (SERVERNUM - 1)) - 1) - (1 << (this_server_id_yog1 - 1)))
 
 #define log_level          1   //1  packet level    2 flow level
 #define show_flow          1
@@ -114,7 +115,7 @@ int total_flow_num_yog1 = 9995;   // total flows among all servers
 //！！！！！！！！！！！所有流量ID从1开始
 
 #define TIMER_LCORE         2 
-#define TIMER_INTERVAL_MS   0.0005//定时器触发间隔，这里是0.1秒
+#define TIMER_INTERVAL_MS   0.000005//定时器触发间隔，这里是0.1秒
 
 #define PT_INF_yog1O            0X20
 #define PT_GRANT                0X21
@@ -161,6 +162,9 @@ struct flow_info {//记录一条流的全部信息
     uint32_t receiver_recvlen;//接收端接收到的数据长度,记得初始化
     double   receiver_finish_time;//接收端流结束时间
     uint32_t unexcept_pkt_count;
+
+
+    bool is_pre_grant;
     
 };
 
@@ -221,9 +225,10 @@ static uint32_t ip_addr_array[SERVERNUM];
 
 double start_cycle, elapsed_cycle;
 double flowgen_start_time;
-double warm_up_time_yog1 = 12.0; // in sec
+double warm_up_time_yog1 = 20.0; // in sec
 double sync_start_time_yog1 = 3.0; // within warm_up_time_yog1
-int    sync_done_yog1 = 1;
+int    sync_done_yog1 = 0;
+uint32_t sync_count;
 double hz;
 struct fwd_stream *global_fs;
 
@@ -234,8 +239,6 @@ struct flow_info *receiver_flows;
 
 struct rte_mbuf *sender_pkts_burst[MAX_PKT_BURST];
 struct rte_mbuf *receiver_pkts_burst[MAX_PKT_BURST];
-int    sender_current_burst_size_yog1;
-int    receiver_current_burst_size_yog1;
 FILE* fp;
 FILE* fct_fp;
 char filename[256];
@@ -433,9 +436,9 @@ send_data(void){
 
         construct_data(small_flow_id);
 
-        // statr_timeout_timer(small_flow_id,sender_flows[small_flow_id].sender_unack_size);
-        if(sending_flow_id_yog1 > 0 && sender_flows[sending_flow_id_yog1].sender_wait_count>0)
-            sender_flows[sending_flow_id_yog1].sender_wait_count--;
+        // // statr_timeout_timer(small_flow_id,sender_flows[small_flow_id].sender_unack_size);
+        // if(sending_flow_id_yog1 > 0 && sender_flows[sending_flow_id_yog1].sender_wait_count>0)
+        //     sender_flows[sending_flow_id_yog1].sender_wait_count--;
         return;
     }
     // 如果没有小流
@@ -443,11 +446,11 @@ send_data(void){
     if (sending_flow_id_yog1 <= 0)
         return;
     // 如果有，但是有wait计数
-    if (sender_flows[sending_flow_id_yog1].sender_wait_count > 0)
-    {
-        sender_flows[sending_flow_id_yog1].sender_wait_count--;
-        return;
-    }
+    // if (sender_flows[sending_flow_id_yog1].sender_wait_count > 0)
+    // {
+    //     sender_flows[sending_flow_id_yog1].sender_wait_count--;
+    //     return;
+    // }
     if (sender_flows[sending_flow_id_yog1].sender_can_send_size > 0)
         construct_data(sending_flow_id_yog1);
     // statr_timeout_timer(sending_flow_id_yog1,sender_flows[sending_flow_id_yog1].sender_unack_size);
@@ -855,17 +858,20 @@ construct_sync(int dst_server_id){
     // if(DEBUG_LOCK_yog1) printf("[lock]construct_sync got lock\n");
     
     // struct rte_mempool *mbp = current_fwd_lcore()->mbp;
-    struct rte_mbuf *pkt = rte_mbuf_raw_alloc(send_pool_yog1);
+    struct rte_mbuf *pkt = rte_pktmbuf_alloc(send_pool_yog1);
     if (!pkt) {
         if(SHOW_DEBUG_INFO_yog1) printf("sync server %d: allocation pkt error", dst_server_id);
         rte_panic("sync server %d: allocation pkt error", dst_server_id);
     }
+
+    rte_pktmbuf_reset(pkt);
 
     pkt->data_len = pkt_size;
     pkt->next = NULL;
 
     /* Initialize Ethernet header. */
     eth_hdr = rte_pktmbuf_mtod(pkt, struct rte_ether_hdr *);
+    memset(eth_hdr, 0, L2_LEN);
     rte_ether_addr_copy(&eth_addr_array[dst_server_id], &eth_hdr->dst_addr);
     rte_ether_addr_copy(&eth_addr_array[this_server_id_yog1], &eth_hdr->src_addr);
     eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
@@ -884,6 +890,9 @@ construct_sync(int dst_server_id){
     ip_hdr->total_length    = RTE_CPU_TO_BE_16(pkt_size - L2_LEN);
     ip_hdr->hdr_checksum    = ip_sum((unaligned_uint16_t *)ip_hdr, L3_LEN);
 
+    printf("will send to server %d, ip %u, eth %x\n", dst_server_id, ip_addr_array[dst_server_id], eth_addr_array[dst_server_id].addr_bytes[5]);
+    printf("ip %u eth %x\n", ip_hdr->dst_addr, eth_hdr->dst_addr.addr_bytes[5]);
+
     /* Initialize transport header. */
     transport_hdr = (struct rte_tcp_hdr *)(ip_hdr + 1);
     transport_hdr->src_port       = 55555;
@@ -892,20 +901,21 @@ construct_sync(int dst_server_id){
     transport_hdr->recv_ack       = 0;
     transport_hdr->PKT_TYPE_8BITS = PT_SYNC;
     
-    tx_offloads = ports[global_fs->tx_port].dev_conf.txmode.offloads;
-    if (tx_offloads & DEV_TX_OFFLOAD_VLAN_INSERT)
-        ol_flags = PKT_TX_VLAN_PKT;
-    if (tx_offloads & DEV_TX_OFFLOAD_QINQ_INSERT)
-        ol_flags |= PKT_TX_QINQ_PKT;
-    if (tx_offloads & DEV_TX_OFFLOAD_MACSEC_INSERT)
-        ol_flags |= PKT_TX_MACSEC;
+    // tx_offloads = ports[global_fs->tx_port].dev_conf.txmode.offloads;
+    // if (tx_offloads & DEV_TX_OFFLOAD_VLAN_INSERT)
+    //     ol_flags = PKT_TX_VLAN_PKT;
+    // if (tx_offloads & DEV_TX_OFFLOAD_QINQ_INSERT)
+    //     ol_flags |= PKT_TX_QINQ_PKT;
+    // if (tx_offloads & DEV_TX_OFFLOAD_MACSEC_INSERT)
+    //     ol_flags |= PKT_TX_MACSEC;
 
+    // rte_pktmbuf_adj(pkt, (uint16_t)(pkt->pkt_len - pkt_size));
     pkt->nb_segs        = 1;
     pkt->data_len       = pkt_size;
     pkt->pkt_len        = pkt_size;
-    pkt->ol_flags       = ol_flags;
-    pkt->vlan_tci       = ports[global_fs->tx_port].tx_vlan_id;
-    pkt->vlan_tci_outer = ports[global_fs->tx_port].tx_vlan_id_outer;
+    // pkt->ol_flags       = ol_flags;
+    // pkt->vlan_tci       = ports[global_fs->tx_port].tx_vlan_id;
+    // pkt->vlan_tci_outer = ports[global_fs->tx_port].tx_vlan_id_outer;
     pkt->l2_len         = L2_LEN;
     pkt->l3_len         = L3_LEN;
 
@@ -936,6 +946,7 @@ record_new_flow_info(struct Parsing_info* Par_info,struct rte_tcp_hdr *transport
     receiver_flows[Par_info->flow_id].rank_in_sender          = Par_info->rank_in_sender;
     receiver_flows[Par_info->flow_id].flow_finished           = 0;
     receiver_flows[Par_info->flow_id].remain_size             = Par_info->flow_remain_size;
+    
 
     if (receiver_flows[Par_info->flow_id].remain_size > sender_flows[Par_info->flow_id].flow_size) // should not happend
     {
@@ -1227,8 +1238,8 @@ recv_data(struct rte_tcp_hdr *transport_recv_hdr, struct rte_ipv4_hdr *ipv4_hdr)
             record_new_flow_info(Par_info, transport_recv_hdr, ipv4_hdr);           // 并记录流信息
             addSet(receiver_smallflow_arr, Par_info->flow_id, receiver_flows); // 加入小流列表
         }
-        if (receiving_flow_id_yog1 != 0) // 如果正在接收流不是空的，那么就要对该流发送wait
-            send_ctl_pkt(PT_WAIT, receiving_flow_id_yog1, 0);
+        // if (receiving_flow_id_yog1 != 0) // 如果正在接收流不是空的，那么就要对该流发送wait
+        //     send_ctl_pkt(PT_WAIT, receiving_flow_id_yog1, 0);
     }
     if (!contains(receiver_actflow_arr, Par_info->flow_id) && !contains(receiver_smallflow_arr, Par_info->flow_id))
     {
@@ -1240,28 +1251,42 @@ recv_data(struct rte_tcp_hdr *transport_recv_hdr, struct rte_ipv4_hdr *ipv4_hdr)
         receiver_flows[Par_info->flow_id].remain_size = 0;
     receiver_flows[Par_info->flow_id].receiver_recvlen += (DEFAULT_PKT_SIZE - HDR_ONLY_SIZE); // G更新记录的流信息
     send_ctl_pkt(PT_ACK, Par_info->flow_id, 0);
-    if (Par_info->flow_size <= RTT_BYTES)
-    {                                                                              // 如果是个小流
-        updateSet(receiver_smallflow_arr, Par_info->flow_id, receiver_flows); // 保证链表有序
-    }
-    else
+    if (Par_info->flow_size > RTT_BYTES)
+    // {                                                                              // 如果是个小流
+    //     updateSet(receiver_smallflow_arr, Par_info->flow_id, receiver_flows); // 保证链表有序
+    // }
+    // else
     {
         if (contains(receiver_firmflow_arr, Par_info->flow_id))
             updateSet(receiver_firmflow_arr, Par_info->flow_id, receiver_flows);
     }
-
-    if (sender_flows[Par_info->flow_id].flow_size > RTT_BYTES && (receiving_flow_id_yog1 == 0 || receiving_flow_id_yog1 != Par_info->flow_id))
-    { // 如果接收到的是个大流且不是正在接收流
-        if (receiver_flows[Par_info->flow_id].unexcept_pkt_count == 0)
-        {
-            receiver_flows[Par_info->flow_id].unexcept_pkt_count = RTT_BYTES / (DEFAULT_PKT_SIZE - HDR_ONLY_SIZE);
-            send_ctl_pkt(PT_REFUSE, Par_info->flow_id, 1);
-        }
-        else
-        {
-            receiver_flows[Par_info->flow_id].unexcept_pkt_count--;
+    if(Par_info->flow_id==receiving_flow_id_yog1){
+        if(receiver_flows[Par_info->flow_id].remain_size<=RTT_BYTES && sender_flows[Par_info->flow_id].is_pre_grant==0){
+            
+            int ret = removeElement(receiver_firmflow_arr,receiving_flow_id_yog1);
+            int new_flow = getset_smallest_flowid(receiver_firmflow_arr);
+            if(new_flow>0){
+                send_ctl_pkt(PT_GRANT,new_flow,0);
+                sender_flows[Par_info->flow_id].is_pre_grant = 1;
+            }
+            if(ret!=-1)
+                addSet(receiver_firmflow_arr,receiving_flow_id_yog1,receiver_flows);
+                
         }
     }
+
+    // if (sender_flows[Par_info->flow_id].flow_size > RTT_BYTES && (receiving_flow_id_yog1 == 0 || receiving_flow_id_yog1 != Par_info->flow_id))
+    // { // 如果接收到的是个大流且不是正在接收流
+    //     if (receiver_flows[Par_info->flow_id].unexcept_pkt_count == 0)
+    //     {
+    //         receiver_flows[Par_info->flow_id].unexcept_pkt_count = RTT_BYTES / (DEFAULT_PKT_SIZE - HDR_ONLY_SIZE);
+    //         send_ctl_pkt(PT_REFUSE, Par_info->flow_id, 1);
+    //     }
+    //     else
+    //     {
+    //         receiver_flows[Par_info->flow_id].unexcept_pkt_count--;
+    //     }
+    // }
     // 流结束相关操作：
     if (receiver_flows[Par_info->flow_id].remain_size <= 0)
     {
@@ -1605,6 +1630,23 @@ recv_flow_finish(struct rte_tcp_hdr *transport_recv_hdr, struct rte_ipv4_hdr *ip
     }
 
     
+
+    free(Par_info);
+}
+
+static void recv_sync(struct rte_tcp_hdr *transport_recv_hdr, struct rte_ipv4_hdr *ipv4_hdr)
+{
+    Parsing_info* Par_info = get_parse_info(transport_recv_hdr,ipv4_hdr);
+
+    int server = rte_be_to_cpu_32(ipv4_hdr->src_addr) & 0xff;
+    // printf("recv sync from server %d\n", server);
+    sync_count = sync_count | (1 << (server-1));
+    printf("%x, %x\n", sync_count, MASK);
+    if(sync_count == MASK)
+    {
+        printf("sync done\n");
+        sync_done_yog1 = 1;
+    }
 
     free(Par_info);
 }
@@ -2364,7 +2406,7 @@ construct_ctl_pkt(int pkt_type,int flow_id,int where)//构建数据包并加入�
     if (dst_server_id == -1) {
         if(SHOW_DEBUG_INFO_yog1) printf("server error: cannot find server id\n");
     }
-    rte_ether_addr_copy(&eth_addr_array[where], &eth_hdr->dst_addr);
+    rte_ether_addr_copy(&eth_addr_array[dst_server_id], &eth_hdr->dst_addr);
     rte_ether_addr_copy(&eth_addr_array[this_server_id_yog1], &eth_hdr->src_addr);
     eth_hdr->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
@@ -2861,6 +2903,11 @@ read_config(void)
         // }
         server_id++;
     }
+
+    for(int i=0; i<=8; i++)
+    {
+        printf("eth_addr_array[%d] = %x:%x:%x:%x:%x:%x\n", i, eth_addr_array[i].addr_bytes[0], eth_addr_array[i].addr_bytes[1], eth_addr_array[i].addr_bytes[2], eth_addr_array[i].addr_bytes[3], eth_addr_array[i].addr_bytes[4], eth_addr_array[i].addr_bytes[5]);
+    }
     fclose(fd);
 
     /* Read ip address info */
@@ -2956,6 +3003,7 @@ init(void)
         sender_flows[flow_id].sender_acklen               = 0;
         sender_flows[flow_id].sender_can_send_size      = flow_size;
         sender_flows[flow_id].sender_wait_count         = 0;
+        sender_flows[flow_id].is_pre_grant              = 0;
         receiver_flows[flow_id].receiver_finish_time    = -1;
         //接收端在接收到INF_yog1O后要将信息落实全面
         // if(SHOW_DEBUG_INFO_yog1) printf("THIS IP  = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
@@ -3053,6 +3101,8 @@ recv_pkt(struct fwd_stream *fs)
     /* Receive a burst of packets. */
     nb_rx = rte_eth_rx_burst(fs->rx_port, fs->rx_queue, pkts_burst, nb_pkt_per_burst);
 
+    // printf("rx: %d\n", nb_rx);
+
     // struct rte_eth_rxq_info rxq_info;
     // uint32_t queue_size = rte_eth_rx_queue_count(fs->rx_port, fs->rx_queue);
     // rte_eth_rx_queue_info_get(fs->rx_port, fs->rx_queue, &rxq_info);
@@ -3073,20 +3123,19 @@ recv_pkt(struct fwd_stream *fs)
         // mb = rte_pktmbuf_clone(mb, mb->pool);
         ipv4_hdr = rte_pktmbuf_mtod_offset(mb, struct rte_ipv4_hdr *, L2_LEN);
         struct rte_ether_hdr *eth = rte_pktmbuf_mtod(mb, struct rte_ether_hdr*);
-        transport_recv_hdr = rte_pktmbuf_mtod_offset(mb, struct rte_tcp_hdr *, L2_LEN + L3_LEN);
-        pkt_type = transport_recv_hdr->PKT_TYPE_8BITS;
-        uint16_t flow_id = rte_be_to_cpu_16(transport_recv_hdr->FLOW_ID_16BITS);
         if (ipv4_hdr->dst_addr != rte_cpu_to_be_32(ip_addr_array[this_server_id_yog1]))
         {
             print_ether_addr("pkt not for this, src_mac", &(eth->src_addr));
             print_ether_addr("pkt not for this, dst_mac", &(eth->dst_addr));
-            printf("src add = %d %d %d %d\n",ipv4_hdr->src_addr&0xFF,(ipv4_hdr->src_addr&0xFF00)>>8,(ipv4_hdr->src_addr&0xFF0000)>>16,(ipv4_hdr->src_addr&0xFF000000)>>24);
             printf("dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
-            printf("pkt %x from %d, flow id: %d\n", pkt_type, rte_be_to_cpu_32(ipv4_hdr->src_addr)&0xFF, flow_id);
-            if(SAVE_DEBUG_INFO_yog1) fprintf(fp,"rec pkt not for this - dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
+            // if(SAVE_DEBUG_INFO_yog1) fprintf(fp,"rec pkt not for this - dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
             rte_pktmbuf_free(mb);
             continue;
         }
+
+        // print_ether_addr("for this, src_mac", &(eth->src_addr));
+        //     print_ether_addr("for this, dst_mac", &(eth->dst_addr));
+        //     printf("dst add = %d %d %d %d\n",ipv4_hdr->dst_addr&0xFF,(ipv4_hdr->dst_addr&0xFF00)>>8,(ipv4_hdr->dst_addr&0xFF0000)>>16,(ipv4_hdr->dst_addr&0xFF000000)>>24);
 
         l4_proto = ipv4_hdr->next_proto_id;
         if (l4_proto == IPPROTO_TCP) {
@@ -3221,7 +3270,10 @@ recv_pkt(struct fwd_stream *fs)
             // test_recv_pkt(transport_recv_hdr, ipv4_hdr);
             switch (pkt_type) {
                 case PT_SYNC:
-                    sync_done_yog1 += 1;
+                    if (!sync_done_yog1)
+                    {
+                        recv_sync(transport_recv_hdr, ipv4_hdr);
+                    }
                     break;
                 case PT_INF_yog1O:
                     send_ctl_pkt(PT_INF_yog1O_ACK, flow_id, 0);
@@ -3367,15 +3419,18 @@ sender_send_pkt(void)
     for(int i=0; i<sender_current_burst_size_yog1; i++)
     {
         struct rte_mbuf *mb = sender_pkts_burst[i];
+        struct rte_ether_hdr *eth_hdr = rte_pktmbuf_mtod(mb, struct rte_ether_hdr *);
         struct rte_ipv4_hdr *ipv4_hdr = rte_pktmbuf_mtod_offset(mb, struct rte_ipv4_hdr *, L2_LEN);
         struct rte_tcp_hdr * transport_hdr = (struct rte_tcp_hdr *)(ipv4_hdr + 1);
-        if(SHOW_SR_LOG) printf("[send]Will send pkt %x to server %u, flow id: %d\n", transport_hdr->PKT_TYPE_8BITS, rte_be_to_cpu_32(ipv4_hdr->dst_addr)&0xFF, rte_be_to_cpu_16(transport_hdr->FLOW_ID_16BITS));
-        if(SAVE_SR_LOG) fprintf(fp, "[send]Will send pkt %x to server %u, flow id: %d\n", transport_hdr->PKT_TYPE_8BITS, rte_be_to_cpu_32(ipv4_hdr->dst_addr)&0xFF, rte_be_to_cpu_16(transport_hdr->FLOW_ID_16BITS));
+
+        printf("[send] send ip %u eth %x\n", ipv4_hdr->dst_addr, eth_hdr->dst_addr.addr_bytes[5]);
+        // if(SHOW_SR_LOG) printf("[send]Will send pkt %x to server %u, flow id: %d\n", transport_hdr->PKT_TYPE_8BITS, rte_be_to_cpu_32(ipv4_hdr->dst_addr)&0xFF, rte_be_to_cpu_16(transport_hdr->FLOW_ID_16BITS));
+        // if(SAVE_SR_LOG) fprintf(fp, "[send]Will send pkt %x to server %u, flow id: %d\n", transport_hdr->PKT_TYPE_8BITS, rte_be_to_cpu_32(ipv4_hdr->dst_addr)&0xFF, rte_be_to_cpu_16(transport_hdr->FLOW_ID_16BITS));
     }
 
     uint16_t nb_pkt = sender_current_burst_size_yog1;
     uint16_t nb_tx = rte_eth_tx_burst(global_fs->tx_port, global_fs->tx_queue, sender_pkts_burst, nb_pkt);
-    // if(SAVE_DEBUG_INFO_yog1) fprintf(fp,"get %d pkt to send\n",nb_pkt);
+    // printf("sent get %d pkt\n",nb_pkt);
     if (unlikely(nb_tx < nb_pkt) && global_fs->retry_enabled) {
         uint32_t retry = 0;
         while (nb_tx < nb_pkt && retry++ < burst_tx_retry_num) {
@@ -3388,7 +3443,7 @@ sender_send_pkt(void)
                                         &sender_pkts_burst[nb_tx], nb_pkt - nb_tx);
         }
     }
-    rte_pktmbuf_free_bulk(sender_pkts_burst,sender_current_burst_size_yog1);
+    // rte_pktmbuf_free_bulk(sender_pkts_burst,sender_current_burst_size_yog1);
     global_fs->tx_packets += nb_tx;
     sender_current_burst_size_yog1 = 0;
 }
@@ -3602,32 +3657,39 @@ main_flowgen(struct fwd_stream *fs)
 
      start_cycle = rte_rdtsc();
      elapsed_cycle = 0;
-     sync_done_yog1 = 1;
+     sync_done_yog1 = 0;
      flowgen_start_time = start_cycle / (double)hz;
-    //  while (elapsed_cycle / (double)hz < warm_up_time_yog1)
-    //  {
-    //     recv_pkt(fs);
-    //     elapsed_cycle = rte_rdtsc() - start_cycle;
-    //     if (elapsed_cycle / (double)hz > sync_start_time_yog1)
-    //     {
-    //         for (int i = 1; i <= SERVERNUM; i++)
-    //         {
-    //              if (i != this_server_id_yog1)
-    //                 construct_sync(i);
-    //              if (verbose_yog1 > 0)
-    //              {
-    //                 print_elapsed_time();
-    //                 printf(" - sync pkt sent of server_id %d\n", i);
-    //              }
-    //         }
-    //         sender_send_pkt();
-    //     }
-    //     if (sync_done_yog1 == SERVERNUM)
-    //     {
-    //         warm_up_time_yog1 = elapsed_cycle / (double)hz;
-    //         break;
-    //     }
-    //  }
+     double last_time = flowgen_start_time;
+     while (elapsed_cycle / (double)hz < warm_up_time_yog1)
+     {
+        recv_pkt(fs);
+        double now = rte_rdtsc() / (double)hz;
+        if (now - last_time > 1)
+        {
+            for (int i = SERVERNUM-1; i >0; i--)
+            {
+                 if (i != this_server_id_yog1)
+                 {
+                    // if(i==8)
+                    // construct_sync(8);
+                    construct_sync(i);
+                 }
+                 if (verbose_yog1 > 0)
+                 {
+                    print_elapsed_time();
+                    printf(" - sync pkt sent of server_id %d\n", i);
+                 }
+            }
+            // sender_send_pkt();
+            last_time = now;
+            exit(0);
+        }
+        if (sync_done_yog1 == 1)
+        {
+            warm_up_time_yog1 = elapsed_cycle / (double)hz;
+            break;
+        }
+     }
      printf("Warm up and sync delay = %.2lf sec\n", warm_up_time_yog1);
      printf("\nExit warm up and sync loop...\n\n");
 
@@ -3663,11 +3725,11 @@ main_flowgen(struct fwd_stream *fs)
         recv_pkt(fs);
 
         //  printf("exit recv_pkt\n");
-        now = rte_rdtsc() / (double)hz;
-        if(now-last_send>TIMER_INTERVAL_MS){
+        // now = rte_rdtsc() / (double)hz;
+        // if(now-last_send>TIMER_INTERVAL_MS){
             send_data();
-            last_send = now;
-        }
+        //     last_send = now;
+        // }
 
         total_time_phase3 += rte_rdtsc() / (double)hz - now;
 

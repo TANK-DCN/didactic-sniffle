@@ -2,7 +2,7 @@
 
 set -e
 
-SERVERS=("hp012" "hp026" "hp019" "hp034" "hp016" "hp033" "hp035" "hp027")
+SERVERS=("hp012" "hp039" "hp013" "hp024" "hp032" "hp014" "hp038" "hp037")
 NUM_SERVERS=${#SERVERS[@]}
 
 for i in {0..7}

@@ -2,23 +2,23 @@
 
 set -e
 
-SERVERS=("hp012" "hp026" "hp019" "hp034" "hp016" "hp033" "hp035" "hp027")
+SERVERS=("hp006" "hp038" "hp014" "hp037" "hp013" "hp032" "hp034" "hp024")
 
-# mkdir -p ./configs/config
-# cp ./configs/templates/eth_addr_info_template.txt ./configs/config/eth_addr_info.txt
-# cp configs/templates/ip_addr_info.txt ./configs/config/
-# cp configs/templates/flow_info_gen_yog_homa.txt ./configs/config/
+mkdir -p ./configs/config
+cp ./configs/templates/eth_addr_info_template.txt ./configs/config/eth_addr_info.txt
+cp configs/templates/ip_addr_info.txt ./configs/config/
+cp configs/templates/flow_info_gen_yog_homa.txt ./configs/config/
 
-# NUM_SERVERS=${#SERVERS[@]}
+NUM_SERVERS=${#SERVERS[@]}
+for i in {0..7}
+do
+    SERVER="${SERVERS[$i]}.utah.cloudlab.us"
+    ssh $SERVER "cat /sys/class/net/ens1f1np1/address" >> ./configs/config/eth_addr_info.txt
+done
+
+
 # for i in {0..${NUM_SERVERS}}
-# do
-#     SERVER="${SERVERS[$i]}.utah.cloudlab.us"
-#     ssh $SERVER "cat /sys/class/net/ens1f1np1/address" >> ./configs/config/eth_addr_info.txt
-# done
-
-
-# for i in {0..${NUM_SERVERS}}
-for i in {6..7}
+for i in {0..7}
 do
     SERVER="${SERVERS[$i]}.utah.cloudlab.us"
     echo "$SERVER"
