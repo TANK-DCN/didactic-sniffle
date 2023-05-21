@@ -22,19 +22,57 @@ request = pc.makeRequestRSpec()
 pc.defineParameter("server_num",
                    "server number",
                    portal.ParameterType.INTEGER, 1)
-                   
-pc.defineParameter("if_switch",
-                   "if need switchr",
-                   portal.ParameterType.BOOLEAN, False, [True, False])
 
 pc.defineParameter("hardware_type",
                    "Optional physical node type (d710, c8220, etc)",
                    portal.ParameterType.STRING, "")
 
+# Pick your OS.
+imageList = [
+    ('default', 'Default Image'),
+    ('urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU20-64-STD', 'UBUNTU 20.04'),
+    ('urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU18-64-STD', 'UBUNTU 18.04'),
+    ('urn:publicid:IDN+apt.emulab.net+image+servelesslegoos-PG0:ml5.ubuntu18:0',  'Apt Ubuntu18.04+mlx5'),
+    ('urn:publicid:IDN+utah.cloudlab.us+image+servelesslegoos-PG0:homa.node2:0', 'Utah Ubuntu18.04+mlx5')]
+
+pc.defineParameter("osImage", "Select OS image",
+                   portal.ParameterType.IMAGE,
+                   imageList[3], imageList,
+                   longDescription="Most clusters have this set of images, " +
+                   "pick your favorite one.")
+
+                   
+pc.defineParameter("if_switch",
+                   "if need switchr",
+                   portal.ParameterType.BOOLEAN, False, [True, False])
+
 pc.defineParameter("phystype", "Switch type",
                    portal.ParameterType.STRING, "dell-s4048",
                    [('mlnx-sn2410', 'Mellanox SN2410'),
                     ('dell-s4048',  'Dell S4048')])
+
+# Optional link speed, normally the resource mapper will choose for you based on node availability
+pc.defineParameter("linkSpeed", "Link Speed",portal.ParameterType.INTEGER, 0,
+                   [(0,"Any"),(100000,"100Mb/s"),(1000000,"1Gb/s"),(10000000,"10Gb/s"),(25000000,"25Gb/s"),(100000000,"100Gb/s")],
+                   advanced=True,
+                   longDescription="A specific link speed to use for your lan. Normally the resource " +
+                   "mapper will choose for you based on node availability and the optional physical type.")
+                   
+# For very large lans you might to tell the resource mapper to override the bandwidth constraints
+# and treat it a "best-effort"
+pc.defineParameter("bestEffort",  "Best Effort", portal.ParameterType.BOOLEAN, False,
+                    advanced=True,
+                    longDescription="For very large lans, you might get an error saying 'not enough bandwidth.' " +
+                    "This options tells the resource mapper to ignore bandwidth and assume you know what you " +
+                    "are doing, just give me the lan I ask for (if enough nodes are available).")
+                    
+# Sometimes you want all of nodes on the same switch, Note that this option can make it impossible
+# for your experiment to map.
+pc.defineParameter("sameSwitch",  "No Interswitch Links", portal.ParameterType.BOOLEAN, False,
+                    advanced=True,
+                    longDescription="Sometimes you want all the nodes connected to the same switch. " +
+                    "This option will ask the resource mapper to do that, although it might make " +
+                    "it imppossible to find a solution. Do not use this unless you are sure you need it!")
 
 # Retrieve the values the user specifies during instantiation.
 params = pc.bindParameters()
@@ -51,6 +89,12 @@ if params.if_switch:
         swifaces.append(mysw.addInterface())
 else:
     lan = request.LAN()
+    if params.bestEffort:
+        lan.best_effort = True
+    elif params.linkSpeed > 0:
+        lan.bandwidth = params.linkSpeed
+    if params.sameSwitch:
+        lan.setNoInterSwitchLinks()
 
 nodes = []
 for i in range(num):
@@ -62,7 +106,7 @@ for i in range(num):
         node.hardware_type = "d6515"
 
     node.installRootKeys(False, True)
-    node.disk_image = "urn:publicid:IDN+utah.cloudlab.us+image+servelesslegoos-PG0:homa.node2"
+    node.disk_image = params.osImage
     iface = node.addInterface("eth1")
     # ip_addr = "192.168.1."+str(i+1)
     # iface.addAddress(pg.IPv4Address(ip_addr, "255.255.255.0"))
