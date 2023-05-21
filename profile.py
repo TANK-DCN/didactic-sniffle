@@ -102,8 +102,6 @@ for i in range(num):
     node = request.RawPC(node_name)
     if params.hardware_type != "":
         node.hardware_type = params.hardware_type
-    else:
-        node.hardware_type = "d6515"
 
     node.installRootKeys(False, True)
     node.disk_image = params.osImage
