@@ -32,7 +32,7 @@ imageList = [
     ('default', 'Default Image'),
     ('urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU20-64-STD', 'UBUNTU 20.04'),
     ('urn:publicid:IDN+emulab.net+image+emulab-ops//UBUNTU18-64-STD', 'UBUNTU 18.04'),
-    ('urn:publicid:IDN+apt.emulab.net+image+servelesslegoos-PG0:ml5.ubuntu18:0',  'Apt Ubuntu18.04+mlx5'),
+    ('urn:publicid:IDN+apt.emulab.net+image+servelesslegoos-PG0:ml5.ubuntu18:1',  'Apt Ubuntu18.04+mlx5'),
     ('urn:publicid:IDN+utah.cloudlab.us+image+servelesslegoos-PG0:homa.node2:0', 'Utah Ubuntu18.04+mlx5')]
 
 pc.defineParameter("osImage", "Select OS image",
