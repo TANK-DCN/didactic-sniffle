@@ -14,5 +14,7 @@ do
 
     scp ./expcode/yog1.sh yrpang@${SERVER}:/local/dpdk-stable-21.11.2/build/app
 
+    ssh $SERVER 'echo eth | sudo tee "/sys/bus/pci/devices/0000\:08\:00.0/mlx4_port1"'
+
     ssh $SERVER ninja -C /local/dpdk-stable-21.11.2/build 2>&1 > log/build_${i}.log &
 done

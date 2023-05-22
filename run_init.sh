@@ -3,7 +3,7 @@
 set -e
 
 # SERVERS=("hp006" "hp038" "hp014" "hp037" "hp013" "hp032" "hp034" "hp024")
-SERVERS=("apt179" "apt192" "apt189" "apt177" "apt178" "apt187" "apt139" "apt158")
+SERVERS=("apt190" "apt178" "apt177" "apt182" "apt169" "apt179" "apt189" "apt188")
 
 mkdir -p ./configs/config
 cp ./configs/templates/eth_addr_info_template.txt ./configs/config/eth_addr_info.txt
@@ -15,6 +15,7 @@ for i in {0..7}
 do
     # SERVER="${SERVERS[$i]}.utah.cloudlab.us"
     SERVER="${SERVERS[$i]}.apt.emulab.net"
+    # ssh-keyscan -H $SERVER >> ~/.ssh/known_hosts
     # ssh $SERVER "cat /sys/class/net/ens1f1np1/address" >> ./configs/config/eth_addr_info.txt
     ssh $SERVER "cat /sys/class/net/enp8s0d1/address" >> ./configs/config/eth_addr_info.txt
 done
