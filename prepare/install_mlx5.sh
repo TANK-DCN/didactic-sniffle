@@ -8,7 +8,7 @@ exec 1> >(logger -s -t $(basename $0)) 2>&1
 echo $* | grep -q "mlnx-dpdk" && MLNX_DPDK=yes || MLNX_DPDK=no
 HOSTNAME=$(hostname -f | cut -d"." -f1)
 HW_TYPE=$(geni-get manifest | grep $HOSTNAME | grep -oP 'hardware_type="\K[^"]*')
-MLNX_OFED_VER=5.7-1.0.2.0
+MLNX_OFED_VER=4.9-6.0.6.0
 if [ "$HW_TYPE" = "m510" ] || [ "$HW_TYPE" = "xl170" ] || [ "$HW_TYPE" = "r320" ] || [ "$HW_TYPE" = "c6220" ]; then
     OS_VER="ubuntu`lsb_release -r | cut -d":" -f2 | xargs`"
     MLNX_OFED="MLNX_OFED_LINUX-$MLNX_OFED_VER-$OS_VER-x86_64"
@@ -84,7 +84,7 @@ if [ ! -z "$MLNX_OFED" ]; then
 
     # m510 and xl170 nodes are equipped with Mellanox Ethernet cards, which can
     # be used via either DPDK or the raw mlx4/5 driver.
-    if [ "$MLNX_DPDK" = "yes" ] && ([ "$HW_TYPE" = "m510" ] || [ "$HW_TYPE" = "xl170" ]); then
+    if [ "$MLNX_DPDK" = "yes" ] && ([ "$HW_TYPE" = "m510" ] || [ "$HW_TYPE" = "xl170" ] || [ "$HW_TYPE" = "r320" ]); then
         # Note: option "--upstream-libs --dpdk" is required to compile DPDK later.
         # http://doc.dpdk.org/guides/nics/mlx5.html#quick-start-guide-on-ofed-en
         $MLNX_OFED/mlnxofedinstall --dpdk --upstream-libs --force --without-fw-update
@@ -108,7 +108,7 @@ if [ "$HW_TYPE" = "c8220" ] || [ "$HW_TYPE" = "c6320" ]; then
 fi
 
 # Configure 4K 2MB huge pages permanently.
-echo "vm.nr_hugepages=4096" >> /etc/sysctl.conf
+# echo "vm.nr_hugepages=4096" >> /etc/sysctl.conf
 
 # if [ "$RC_NODE" = "rcnfs" ]; then
 #     # Setup nfs server following instructions from the links below:
